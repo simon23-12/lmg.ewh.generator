@@ -2,62 +2,117 @@ import streamlit as st
 from groq import Groq
 import os
 
-# --- Ladefunktion für deine Markdown-Beispiele ---
+# --- 1. KONFIGURATION UND UTILITY FUNKTIONEN ---
+
+# Wortzahl-Limits basierend auf den NRW-Vorgaben
+WORD_LIMITS = {
+    "GK (Lesen/Schreiben, Q-Phase)": 800,
+    "LK (Lesen/Schreiben, Q-Phase)": 1000,
+    "Mediation/Sprachmittlung": 650,
+    "EF/GK (Allgemein)": 600,
+    "LK Q-Phase (Allgemein)": 800
+}
+
 def load_example(thema):
-    # Sucht die passende .md Datei im Ordner 'vorlagen'
+    """Lädt die passende .md Vorlage aus dem 'vorlagen' Ordner."""
     file_path = os.path.join("vorlagen", f"{thema}.md")
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
     return "Fehler: Beispiel-Vorlage nicht gefunden."
 
-# --- Streamlit App Logik ---
-st.title("🎓 NRW EH-Generator (Kostenlose Version)")
+def count_words(text):
+    """Zählt die Wörter im Eingabetext."""
+    # Split auf Leerzeichen und filtert leere Strings heraus
+    return len([word for word in text.split() if word])
 
+# --- 2. STREAMLIT APP LAYOUT ---
+
+st.set_page_config(page_title="NRW EH-Generator", page_icon="🎓")
+st.title("🎓 NRW Erwartungshorizont-Generator (Kostenlos)")
+st.caption("Powered by Llama 3 & Groq API")
+
+# Sidebar für Einstellungen
+st.sidebar.header("⚙️ Konfiguration")
 api_key = st.sidebar.text_input("Groq API Key (kostenlos von console.groq.com)", type="password")
 st.sidebar.markdown("---")
 
-# Wähle das passende Beispiel (zur besseren Führung der KI)
-beispiel_thema = st.sidebar.selectbox(
-    "1. Wähle das beste Beispiel-Thema", 
+# Selection 1: Course Type (GK/LK/EF)
+course_type = st.sidebar.selectbox(
+    "1. Kursniveau:",
+    ["GK/EF (Grundkurs)", "LK (Leistungskurs)"]
+)
+
+# Selection 2: Task Type (used for Word Count Validation)
+task_type = st.sidebar.selectbox(
+    "2. Aufgabentyp (zur Wortzahl-Prüfung):",
+    list(WORD_LIMITS.keys())
+)
+st.sidebar.markdown("---")
+
+# Selection 3: LLM Template (to improve EH quality)
+example_theme = st.sidebar.selectbox(
+    "3. Wähle das am besten passende Musterbeispiel (für die KI-Führung):",
     ["Q1_American_Dream", "Q1_Nigeria", "Q1_Gender_Identity", "Q1_Monarchy"] 
 )
 st.sidebar.markdown("---")
 
-# Lade den Text vom Lehrer
-text_input = st.text_area("2. Klausurtext hier einfügen (vom Lehrer):", height=300)
+# Main Content Area
+st.subheader("📝 Klausurtext Eingabe")
+st.markdown("Bitte **kopiere den vollständigen Klausurtext** (Source Text & Aufgaben) hier ein.")
+text_input = st.text_area("Klausurtext (Copy/Paste):", height=400)
 
-if st.button("3. Erwartungshorizont erstellen"):
-    if not api_key or not text_input:
-        st.error("Bitte gib zuerst den API Key ein und füge den Klausurtext hinzu.")
+# --- 3. WORTZAHL-VALIDIERUNG ---
+word_count = count_words(text_input)
+# Wählt das Limit basierend auf der Auswahl aus, Standard ist 800
+limit = WORD_LIMITS.get(task_type, 800) 
+
+# Anzeige der Wortzahl
+st.info(f"Aktuelle Wortzahl: **{word_count}** Wörter. Das Limit für '{task_type}' ist **{limit}** Wörter.")
+
+# Warnung bei Überschreitung
+if word_count > limit:
+    st.warning(f"⚠️ ACHTUNG: Die Wortzahl ({word_count}) überschreitet die empfohlene Obergrenze ({limit}) für **{task_type}**.")
+elif word_count < 200 and word_count > 0:
+    st.warning("⚠️ WARNUNG: Der Text ist sehr kurz. Bitte prüfen Sie, ob Sie den vollständigen Source Text und die Aufgabenstellung eingefügt haben.")
+
+
+# --- 4. EXECUTION ---
+if st.button("🚀 Erwartungshorizont erstellen"):
+    if not api_key:
+        st.error("Bitte gib den Groq API Key in der Seitenleiste ein.")
+    elif not text_input:
+        st.error("Bitte füge den Klausurtext in das Eingabefeld ein.")
     else:
+        # LLM Call Logic
         client = Groq(api_key=api_key)
         
-        # Das LLM liest zuerst dein Muster-EH und dann den neuen Text.
-        muster_eh = load_example(beispiel_thema)
+        # Lade das relevante Muster aus dem 'vorlagen' Ordner
+        muster_eh = load_example(example_theme)
         
+        # System Prompt: Anpassung an das ausgewählte Kursniveau
         system_prompt = f"""
-        Du bist ein Fachleiter für Englisch in Nordrhein-Westfalen (NRW). 
+        Du bist ein Fachleiter für Englisch in Nordrhein-Westfalen (NRW) für das Kursniveau {course_type}. 
         Deine Hauptaufgabe ist es, für den vom User bereitgestellten Klausurtext einen detaillierten Erwartungshorizont (EH) zu erstellen.
-
-        **BEFOLGE STRENG DIE VORGABEN DES FOLGENDEN MUSTERBEISPIELS:**
-        Das Musterbeispiel unten stammt aus der gleichen Jahrgangsstufe (Q1) und zeigt dir das exakte Format (AFB I, II, III) und die Punkteverteilung.
         
-        ### MUSTERBEISPIEL ANFANG ###
+        **BEFOLGE STRENG DIE VORGABEN DES FOLGENDEN MUSTERBEISPIELS:**
+        Das Musterbeispiel unten zeigt dir das exakte Format (AFB I, II, III) und die Punkteverteilung.
+        
+        ### MUSTERBEISPIEL ANFANG (Formatvorlage: {example_theme}) ###
         {muster_eh} 
         ### MUSTERBEISPIEL ENDE ###
         
-        Erstelle nun für den neuen Input-Text einen EH im exakt gleichen Format und Stil.
+        Erstelle nun für den neuen Input-Text (Wortzahl: {word_count}) einen EH im exakt gleichen Format und Stil.
         """
 
-        with st.spinner(f'KI analysiert den Text und orientiert sich an {beispiel_thema}.md...'):
+        with st.spinner(f'KI analysiert den Text und orientiert sich an {example_theme}.md...'):
             try:
                 chat_completion = client.chat.completions.create(
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": text_input}
                     ],
-                    model="llama3-70b-8192", # Ein sehr starkes, kostenloses Modell von Groq
+                    model="llama3-70b-8192", 
                     temperature=0.5,
                 )
                 st.subheader("✅ Generierter Erwartungshorizont")
